@@ -1,0 +1,37 @@
+parameters:
+  terraformDirectory: ""
+
+steps:
+
+# -------------------------
+# Install Terraform
+# -------------------------
+- task: TerraformInstaller@1
+  inputs:
+    terraformVersion: '1.6.0'
+
+# -------------------------
+# Azure Login (IMPORTANT)
+# -------------------------
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'terraform-sc'
+    scriptType: bash
+    scriptLocation: inlineScript
+    addSpnToEnvironment: true
+    inlineScript: |
+      echo "Logged into Azure"
+      cd ${{ parameters.terraformDirectory }}
+      
+      export ARM_CLIENT_ID=$servicePrincipalId
+      export ARM_CLIENT_SECRET=$servicePrincipalKey
+      export ARM_TENANT_ID=$tenantId
+      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+      export ARM_CLIENT_ID=$servicePrincipalId
+      export ARM_CLIENT_SECRET=$servicePrincipalKey
+      export ARM_TENANT_ID=$tenantId
+      export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+      
+      terraform plan
+  displayName: Terraform plan
+

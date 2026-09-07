@@ -1,0 +1,24 @@
+jobs:
+  - job: DeployDev
+    displayName: Terraform Deploy Dev
+    pool:
+      vmImage: ubuntu-latest
+
+       
+
+    steps:
+      - template: terraform-init.yml
+        parameters:
+          terraformDirectory: infra
+
+      - template: terraform-plan.yml
+        parameters:
+          terraformDirectory: infra
+
+      - template: terraform-apply.yml
+        parameters:
+          terraformDirectory: infra
+
+     ## - template: terraform-destroy.yml
+     ##   parameters:
+     ##     terraformDirectory: infra

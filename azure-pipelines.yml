@@ -1,0 +1,109 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+  appName: 'azurerm-project'
+  dotnetVersion: '8.x'
+  publishOutputDir: '$(Build.ArtifactStagingDirectory)/publish'   
+  azureSubscription: 'terraform-sc'
+
+stages:
+
+# -------------------------
+# DEPLOY-INFRA STAGE
+# -------------------------
+
+  - stage: Deploy_infra
+    jobs:
+    - template: pipelines/templates/deploy-dev.yml
+
+
+  - stage: Build
+    jobs:
+      - job: BuildAndPublish
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              version: $(dotnetVersion)
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore'
+            inputs:
+              command: restore
+              projects: '**/*.csproj'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build'
+            inputs:
+              command: build
+              projects: '**/*.csproj'
+              arguments: '--configuration $(buildConfiguration) --no-restore'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Publish'
+            inputs:
+              command: publish
+              projects: '**/*.csproj'
+              arguments: >
+                --configuration $(buildConfiguration)
+                --output $(publishOutputDir)
+                --no-build
+                --no-self-contained
+              zipAfterPublish: false  # We zip manually below for control
+
+          # ✅ Verify DLL exists before deploying — catches casing/name issues
+          - script: |
+              echo "=== Publish output ==="
+              ls -la $(publishOutputDir)
+              echo "=== DLL files ==="
+              find $(publishOutputDir) -name "*.dll" | head -20
+              echo "=== Runtime config ==="
+              find $(publishOutputDir) -name "*.runtimeconfig.json"
+            displayName: 'Verify publish output'
+
+          - task: ArchiveFiles@2
+            displayName: 'Zip publish output'
+            inputs:
+              rootFolderOrFile: $(publishOutputDir)
+              includeRootFolder: false  # ✅ CRITICAL: zip contents, not the folder
+              archiveType: zip
+              archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+
+          - publish: '$(Build.ArtifactStagingDirectory)/app.zip'
+            artifact: drop
+
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+     - deployment: DeployToAzure
+       environment: production
+       pool:
+         vmImage: 'ubuntu-latest'
+       strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: drop
+
+                # ✅ Use AzureWebApp task — handles slot swap, retry, health check
+                - task: AzureCLI@2
+                  displayName: 'Deploy to App Service'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az webapp deploy \
+                        --resource-group azurerm-project \
+                        --name $(appName) \
+                        --src-path $(Pipeline.Workspace)/drop/app.zip \
+                        --type zip \
+                        --async false \
+                        --timeout 300
